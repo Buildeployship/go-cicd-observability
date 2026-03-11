@@ -1,0 +1,15 @@
+stages:
+  - mirror
+
+mirror-to-github:
+  stage: mirror
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache git
+    - git config --global user.email "197860382+Buildeployship@users.noreply.github.com"
+    - git config --global user.name "Buildeployship"
+  script:
+    - git remote add github https://$GITHUB_TOKEN@github.com/Buildeployship/$CI_PROJECT_NAME.git
+    - git push github HEAD:refs/heads/main --force
+  only:
+    - main
