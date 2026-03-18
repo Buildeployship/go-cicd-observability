@@ -67,7 +67,7 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, "failed to read body", http.StatusBadRequest, start)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	payloadSize.Observe(float64(len(body)))
 
@@ -93,7 +93,7 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (h *WebhookHandler) respondError(w http.ResponseWriter, message string, status int, start time.Time) {
@@ -105,5 +105,5 @@ func (h *WebhookHandler) respondError(w http.ResponseWriter, message string, sta
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
