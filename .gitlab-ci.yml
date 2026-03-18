@@ -1,5 +1,81 @@
 stages:
+  - lint
+  - test
+  - build
+  - scan
+  - push
   - mirror
+
+variables:
+  IMAGE_NAME: $CI_REGISTRY_IMAGE
+  IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+
+lint:
+  stage: lint
+  image: golangci/golangci-lint:latest
+  script:
+    - golangci-lint run --timeout=5m
+  only:
+    - main
+    - merge_requests
+
+test:
+  stage: test
+  image: golang:1.26-alpine
+  before_script:
+    - go install golang.org/x/vuln/cmd/govulncheck@latest
+  script:
+    - go vet ./...
+    - govulncheck ./...
+    - go test -v ./...
+  only:
+    - main
+    - merge_requests
+
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -t $IMAGE_NAME:$IMAGE_TAG -t $IMAGE_NAME:latest .
+    - docker save $IMAGE_NAME:$IMAGE_TAG > image.tar
+  artifacts:
+    paths:
+      - image.tar
+    expire_in: 1 hour
+  only:
+    - main
+
+# trivy scanning
+scan:
+  stage: scan
+  image: aquasec/trivy:latest
+  script:
+    - trivy image --input image.tar --exit-code 1 --severity HIGH,CRITICAL --no-progress
+  dependencies:
+    - build
+  allow_failure: true
+  only:
+    - main
+
+push:
+  stage: push
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker load < image.tar
+    - docker push $IMAGE_NAME:$IMAGE_TAG
+    - docker push $IMAGE_NAME:latest
+  dependencies:
+    - build
+  only:
+    - main
 
 mirror-to-github:
   stage: mirror
@@ -9,7 +85,7 @@ mirror-to-github:
     - git config --global user.email "197860382+Buildeployship@users.noreply.github.com"
     - git config --global user.name "Buildeployship"
   script:
-    - git remote add github https://$GITHUB_TOKEN@github.com/Buildeployship/$CI_PROJECT_NAME.git
+    - git remote add github https://$GITHUB_TOKEN@github.com/Buildeployship/$CI_PROJECT_NAME.git || true
     - git push github HEAD:refs/heads/main --force
   only:
     - main
