@@ -47,7 +47,7 @@ build:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
     - docker build -t $IMAGE_NAME:$IMAGE_TAG -t $IMAGE_NAME:latest .
-    - docker save $IMAGE_NAME:$IMAGE_TAG > image.tar
+    - docker save $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:latest > image.tar
   artifacts:
     paths:
       - image.tar
@@ -60,7 +60,7 @@ scan:
   stage: scan
   image: aquasec/trivy:latest
   script:
-    - trivy image --input image.tar --exit-code 1 --severity HIGH,CRITICAL --no-progress
+    - trivy image --input image.tar --exit-code 1 --severity HIGH,CRITICAL --quiet
   dependencies:
     - build
   allow_failure: true
