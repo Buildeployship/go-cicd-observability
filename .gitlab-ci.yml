@@ -58,7 +58,7 @@ build:
 # trivy scanning
 scan:
   stage: scan
-  image: aquasec/trivy:latest
+  image: aquasec/trivy:0.69.3
   script:
     - trivy image --input image.tar --exit-code 1 --severity HIGH,CRITICAL --quiet
   dependencies:
