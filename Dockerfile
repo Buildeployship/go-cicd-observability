@@ -8,8 +8,6 @@ RUN go mod download
 
 COPY . .
 
-RUN ls -la /app && ls -la /app/cmd || echo "cmd not found"
-
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /relay ./cmd/relay
 
 # Runtime stage
