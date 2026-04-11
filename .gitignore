@@ -14,3 +14,9 @@ Thumbs.db
 # Docker
 docker-compose.override.yml
 nomad/relay.nomad.hcl
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
