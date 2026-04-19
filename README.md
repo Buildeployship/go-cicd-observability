@@ -14,18 +14,18 @@ A Go webhook relay service taken from source code through a full CI/CD pipeline,
 
 ## Phases
 
-| Phase | Focus                                             | Status    |
-|-------|---------------------------------------------------|-----------|
-| 1     | Go webhook relay (local)                          | Shipped   |
-| 2     | GitLab CI/CD pipeline                             | Shipped   |
-| 3     | Observability (LGTM stack)                        | Shipped   |
-| 4     | Nomad + Consul service mesh                       | Shipped   |
-| 5     | Terraform + AWS                                   | Shipped   |
-| 6     | Vault + SOPS + AWS Secrets Manager                | Roadmap   |
-| 7     | GitLab CI/CD deploy stage to ECS                  | Roadmap   |
-| 8     | K8s manifests + Helm chart (alternative to ECS)   | Roadmap   |
-| 9     | Lambda + CloudWatch Events for ECR cleanup        | Roadmap   |
-| 10    | Architecture diagrams + deployment path docs      | Roadmap   |
+| Phase | Focus                                           |
+|-------|-------------------------------------------------|
+| 1     | Go webhook relay (local)                        |
+| 2     | GitLab CI/CD pipeline                           |
+| 3     | Observability (LGTM stack)                      |
+| 4     | Nomad + Consul service mesh                     |
+| 5     | Terraform + AWS                                 |
+| 6     | Vault + SOPS + AWS Secrets Manager              |
+| 7     | GitLab CI/CD deploy stage to ECS                |
+| 8     | K8s manifests + Helm chart (alternative to ECS) |
+| 9     | Lambda + CloudWatch Events for ECR cleanup      |
+| 10    | Architecture diagrams + deployment path docs    |
 
 ---
 
