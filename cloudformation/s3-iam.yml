@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: S3 bucket with encryption, versioning, and IAM access policy
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: go-cicd-observability
+    Description: Project name used for resource naming
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name
+
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-artifacts-${AWS::Region}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-artifacts"
+        - Key: Environment
+          Value: !Ref Environment
+
+  ArtifactBucketPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${ProjectName}-s3-access"
+      Description: Allows read/write access to the artifact bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowBucketList
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource: !GetAtt ArtifactBucket.Arn
+          - Sid: AllowObjectAccess
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource: !Sub "${ArtifactBucket.Arn}/*"
+
+Outputs:
+  BucketName:
+    Description: Artifact bucket name
+    Value: !Ref ArtifactBucket
+  BucketArn:
+    Description: Artifact bucket ARN
+    Value: !GetAtt ArtifactBucket.Arn
+  PolicyArn:
+    Description: S3 access policy ARN
+    Value: !Ref ArtifactBucketPolicy
