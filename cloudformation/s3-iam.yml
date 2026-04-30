@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: S3 bucket with encryption, versioning, and IAM access policy
+Description: S3 bucket with encryption, versioning, IAM access policy, and CloudWatch alarms
 
 Parameters:
   ProjectName:
@@ -54,6 +54,45 @@ Resources:
               - s3:DeleteObject
             Resource: !Sub "${ArtifactBucket.Arn}/*"
 
+  Bucket4xxErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-bucket-4xx-errors"
+      AlarmDescription: Alerts when bucket has elevated client error rate
+      Namespace: AWS/S3
+      MetricName: 4xxErrors
+      Dimensions:
+        - Name: BucketName
+          Value: !Ref ArtifactBucket
+        - Name: FilterId
+          Value: EntireBucket
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  BucketSizeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-bucket-size"
+      AlarmDescription: Alerts when bucket exceeds size threshold
+      Namespace: AWS/S3
+      MetricName: BucketSizeBytes
+      Dimensions:
+        - Name: BucketName
+          Value: !Ref ArtifactBucket
+        - Name: StorageType
+          Value: StandardStorage
+      Statistic: Average
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 5368709120
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+
 Outputs:
   BucketName:
     Description: Artifact bucket name
@@ -64,3 +103,9 @@ Outputs:
   PolicyArn:
     Description: S3 access policy ARN
     Value: !Ref ArtifactBucketPolicy
+  ErrorAlarmArn:
+    Description: 4xx errors alarm ARN
+    Value: !GetAtt Bucket4xxErrorsAlarm.Arn
+  SizeAlarmArn:
+    Description: Bucket size alarm ARN
+    Value: !GetAtt BucketSizeAlarm.Arn
