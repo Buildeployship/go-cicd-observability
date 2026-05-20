@@ -8,7 +8,8 @@
 
 A Go webhook relay service taken from source code through a full CI/CD pipeline, local orchestration with service mesh, a complete observability stack, and a live AWS deployment — all defined as code and torn down cleanly.
 
-**Full ownership from problem to production.** Identify, design, build, deploy, monitor, optimize. No handoffs.
+**Full ownership from problem to production**:<br>
+Identify, design, build, deploy, monitor, optimize. No handoffs.
 
 ---
 
