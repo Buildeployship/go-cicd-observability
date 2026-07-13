@@ -1,6 +1,7 @@
 stages:
   - lint
   - test
+  - secrets
   - build
   - scan
   - push
@@ -101,5 +102,14 @@ mirror-to-github:
   script:
     - git remote add github https://$GITHUB_TOKEN@github.com/Buildeployship/$CI_PROJECT_NAME.git || true
     - git push github HEAD:refs/heads/main --force
+  only:
+    - main
+
+vault-secret-test:
+  stage: secrets
+  image: hashicorp/vault:1.17
+  script:
+    - export VAULT_TOKEN="$(vault write -field=token auth/approle/login role_id=$VAULT_ROLE_ID secret_id=$VAULT_SECRET_ID)"
+    - vault kv get -field=message secret/test/hello
   only:
     - main
