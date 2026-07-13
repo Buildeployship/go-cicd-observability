@@ -8,8 +8,11 @@
 
 A Go webhook relay service taken from source code through a full CI/CD pipeline, local orchestration with service mesh, a complete observability stack, and a live AWS deployment — all defined as code and torn down cleanly.
 
-**Full ownership from problem to production**:<br>
-Identify, design, build, deploy, monitor, optimize. No handoffs.
+## Purpose
+
+**Full ownership from problem to production**: Identify, design, build, deploy, monitor, optimize. No handoffs.
+
+This project is a proof-of-capability build — not a production application, but a deliberate walk through the full DevOps lifecycle using a real Go service as the subject. The goal is to demonstrate ownership of every layer: writing and containerizing the application, building and securing the CI/CD pipeline, instrumenting for observability, orchestrating locally with Nomad and Consul, and deploying to AWS with Terraform. Go was chosen not because I am a Go developer, but because it is the language of the DevOps ecosystem — Docker, Kubernetes, Terraform, and Prometheus are all written in Go — and building in it produces the kind of clean, minimal artifacts that make the infrastructure work visible rather than obscured by runtime complexity. Every phase adds a layer. Every layer is documented. The stack is designed to cover the full breadth of mid-level DevOps tooling in a single coherent project rather than scattered across unrelated exercises.
 
 ---
 
@@ -241,10 +244,50 @@ Total cost: a few dollars in credits. Meter stopped.
 **Proven:** VPC/CIDR/subnet design, NAT-free public subnet layout, ALB target group health checks, ECS task/service lifecycle, IAM least-privilege execution role, S3 state storage with versioning and encryption, end-to-end path from local Docker image to public AWS endpoint.
 
 ---
+## Phase 6 — Vault + AppRole secret injection (in progress)
+
+HashiCorp Vault runs as a systemd service on the homelab, providing secrets to
+the GitLab pipeline via AppRole authentication over Tailscale. This phase covers
+the Vault-native secrets path; SOPS and AWS Secrets Manager remain roadmapped.
+
+**Deployment**
+
+- Vault runs via systemd (`/etc/vault.hcl`), file storage backend at `/var/lib/vault`
+- Listener bound to the host's Tailscale IP so only tailnet devices can reach it —
+  not the LAN, not the public internet
+- KV v2 secrets engine mounted at `secret/`
+
+**AppRole auth for CI**
+
+The pipeline authenticates as a machine, not a human — no root token, no
+long-lived credential in the repo.
+
+- `gitlab-read` policy grants read-only on `secret/data/*` (least privilege)
+- `gitlab` AppRole issues 1h tokens (4h max) carrying that policy
+- `role_id` / `secret_id` stored as masked, protected GitLab CI/CD variables
+- Least privilege verified: an AppRole token reads `secret/test/hello` but is
+  denied write (403), confirming the policy boundary holds
+
+**Pipeline integration** (`.gitlab-ci.yml`, `secrets` stage)
+
+The `vault-secret-test` job runs in a `hashicorp/vault` image, logs in via
+AppRole, and retrieves a secret during the pipeline — proving the runner can
+authenticate to Vault and pull secrets at build time.
+
+**Proven:** Vault init/unseal lifecycle, Shamir key sharing, KV v2 API paths
+(`secret/data/...`), AppRole machine auth, least-privilege policy enforcement,
+CI-to-Vault reachability across a Tailscale mesh.
+
+**Remaining:** SOPS-encrypted config in-repo; AWS Secrets Manager for production
+secrets (to replace the gitignored registry token in `nomad/relay.nomad.hcl`).
+
+---
 
 ## Roadmapped
 
-- **Phase 6** — HashiCorp Vault for app secrets, SOPS for encrypted config files in-repo, AWS Secrets Manager for production secrets (replacing the currently-gitignored registry token in `nomad/relay.nomad.hcl`)
+- **Phase 6 (remaining)** — SOPS for encrypted config files in-repo; AWS Secrets
+  Manager for production secrets (replacing the gitignored registry token in
+  `nomad/relay.nomad.hcl`). Vault + AppRole pipeline integration complete (see above).
 - **Phase 7** — ECS deployment wired directly into the GitLab pipeline's `deploy` stage
 - **Phase 8** — Kubernetes path: manifests, Helm chart, documented rolling / blue-green / canary strategies (Argo Rollouts concepts)
 - **Phase 9** — Lambda (Go or Python) + CloudWatch Events to clean up old ECR images, deployed via Terraform
