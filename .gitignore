@@ -20,3 +20,9 @@ nomad/relay.nomad.hcl
 *.tfstate
 *.tfstate.backup
 *.tfvars
+
+# SOPS / age
+keys.txt
+*.agekey
+secrets.yaml
+*.dec.yaml
