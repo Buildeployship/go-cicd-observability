@@ -1,7 +1,7 @@
 # go-cicd-observability
 
 [![CI/CD](https://github.com/Buildeployship/go-cicd-observability/actions/workflows/ci.yml/badge.svg)](https://github.com/Buildeployship/go-cicd-observability/actions)
-[![GitLab CI/CD](https://img.shields.io/badge/GitLab%20CI%2FCD-6%20stages-FC6D26?logo=gitlab&logoColor=white)](.gitlab-ci.yml)
+[![GitLab CI/CD](https://img.shields.io/badge/GitLab%20CI%2FCD-7%20stages-FC6D26?logo=gitlab&logoColor=white)](.gitlab-ci.yml)
 [![Terraform](https://img.shields.io/badge/Terraform-1.14+-7B42BC?logo=terraform&logoColor=white)](https://www.terraform.io/)
 [![Docker](https://img.shields.io/badge/Docker-multi--stage-2496ED?logo=docker&logoColor=white)](Dockerfile)
 [![AWS](https://img.shields.io/badge/AWS-ECS%20Fargate-FF9900?logo=amazonwebservices&logoColor=white)](terraform/)
@@ -55,6 +55,8 @@ The same container image ships to two deploy targets: a Nomad cluster with Consu
 
 **Operations:** OpenTelemetry, OTel Collector, Tempo, Mimir, Loki, Grafana, Alertmanager, Alloy, CloudWatch
 
+**Secrets:** HashiCorp Vault (AppRole, KMS auto-unseal), SOPS + age, AWS Secrets Manager
+
 ---
 
 ## Phase 1 — Go webhook relay (local)
@@ -84,16 +86,17 @@ curl -X POST http://localhost:8080/webhook \
 
 ## Phase 2 — GitLab CI/CD pipeline
 
-A six-stage pipeline runs on every push: **lint → test → build → scan → push → mirror**. A parallel GitHub Actions workflow runs lint and test so the public mirror carries its own green checks.
+A seven-stage pipeline runs on every push: **lint → test → secrets → build → scan → push → mirror**. A parallel GitHub Actions workflow runs lint and test so the public mirror carries its own green checks.
 
-| Stage  | What it does                                                                                |
-|--------|---------------------------------------------------------------------------------------------|
-| lint   | `golangci-lint run` across the module                                                       |
-| test   | `go vet`, `govulncheck`, `go test -v ./...`                                                 |
-| build  | Multi-stage Docker build, tagged with `$CI_COMMIT_SHORT_SHA` and `latest`                   |
-| scan   | `trivy image` on the built image (HIGH/CRITICAL gated)                                      |
-| push   | Pushes to the self-hosted GitLab Container Registry                                         |
-| mirror | Pushes the commit to the public GitHub mirror (`Buildeployship/go-cicd-observability`)      |
+| Stage   | What it does                                                                                |
+|---------|---------------------------------------------------------------------------------------------|
+| lint    | `golangci-lint run` across the module                                                       |
+| test    | `go vet`, `govulncheck`, `go test -v ./...`                                                 |
+| secrets | Retrieves a secret from Vault via AppRole and decrypts a SOPS file (Phase 6)                 |
+| build   | Multi-stage Docker build, tagged with `$CI_COMMIT_SHORT_SHA` and `latest`                   |
+| scan    | `trivy image` on the built image (HIGH/CRITICAL gated)                                      |
+| push    | Pushes to the self-hosted GitLab Container Registry                                         |
+| mirror  | Pushes the commit to the public GitHub mirror (`Buildeployship/go-cicd-observability`)      |
 
 Protected `main` branch, masked CI/CD variables for registry and mirror credentials. A real HIGH-severity finding in `go.opentelemetry.io/otel/sdk` (CVE-2026-39883) was caught by the scan stage and resolved by bumping OTel to `v1.43.0` — the pipeline did its job.
 
@@ -174,6 +177,8 @@ Nomad's fingerprint flipped from `consul.grpc = -1` to `8502`, the constraint pa
 
 **Note on Nomad env vars:** `nomad alloc exec` opens a shell that does *not* inherit task-level env vars from `template { env = true }` blocks. Runtime values must be verified with `nomad alloc logs -stderr`, not by shelling in and running `echo`.
 
+**Known issue (registry pull):** the GitLab registry advertises its token auth realm as `http://gitlab:80` (`registry['token_realm']`), which is unreachable from Nomad's bridge network — the container serves its web UI on port 80 internally, published as 8081 on the host. Image pulls from the registry fail on the JWT auth step with a connection-refused. The relay job spec itself is complete and credential-free; resolving the realm so Nomad pulls cleanly (point it at a reachable host/port such as the Tailscale IP on 8081, then `gitlab-ctl reconfigure`) is tracked as follow-up.
+
 ---
 
 ## Phase 5 — Terraform + AWS (full deploy / verify / destroy cycle)
@@ -244,59 +249,85 @@ Total cost: a few dollars in credits. Meter stopped.
 **Proven:** VPC/CIDR/subnet design, NAT-free public subnet layout, ALB target group health checks, ECS task/service lifecycle, IAM least-privilege execution role, S3 state storage with versioning and encryption, end-to-end path from local Docker image to public AWS endpoint.
 
 ---
-## Phase 6 — Vault + AppRole secret injection (in progress)
 
-HashiCorp Vault runs as a systemd service on the homelab, providing secrets to
-the GitLab pipeline via AppRole authentication over Tailscale. This phase covers
-the Vault-native secrets path; SOPS and AWS Secrets Manager remain roadmapped.
+## Phase 6 — Secrets management (Vault + SOPS + AWS Secrets Manager)
 
-**Deployment**
+Three secret stores, each scoped to what it is actually for rather than one tool stretched across every job:
 
-- Vault runs via systemd (`/etc/vault.hcl`), file storage backend at `/var/lib/vault`
-- Listener bound to the host's Tailscale IP so only tailnet devices can reach it —
-  not the LAN, not the public internet
+```
+Vault            runtime secrets for CI          (AppRole, short-lived tokens)
+SOPS + age       encrypted config in the repo    (committed, decrypted in CI)
+AWS Secrets Mgr  the AWS deploy path             (native ECS integration, Phase 7)
+```
+
+The design principle throughout: secrets live close to what consumes them, and nothing sensitive lands in the repo in plaintext.
+
+### Vault (systemd + KMS auto-unseal)
+
+HashiCorp Vault runs as a systemd service on the homelab — a single service with a clear lifecycle, which is how Vault is run in most real deployments.
+
+- Config at `/etc/vault.hcl`, file storage backend at `/var/lib/vault`
+- Listener bound to the host's Tailscale IP, so only tailnet devices can reach it — not the LAN, not the public internet
 - KV v2 secrets engine mounted at `secret/`
+- **Auto-unseal via AWS KMS.** Vault seals on every restart by design (the master key is never persisted to disk). Rather than entering three Shamir key shares manually after each reboot, Vault encrypts its master key under a dedicated AWS KMS key and unseals itself on startup. A scoped IAM user (`vault-unseal`) holds a policy allowing only `kms:Encrypt`, `kms:Decrypt`, and `kms:DescribeKey` on that one key — least privilege applied to the credential itself. The original five Shamir keys were migrated to recovery keys during the seal migration and retained for break-glass use.
 
-**AppRole auth for CI**
+### AppRole auth for CI
 
-The pipeline authenticates as a machine, not a human — no root token, no
-long-lived credential in the repo.
+The pipeline authenticates as a machine, not a human — no root token, no long-lived credential in the repo.
 
 - `gitlab-read` policy grants read-only on `secret/data/*` (least privilege)
 - `gitlab` AppRole issues 1h tokens (4h max) carrying that policy
 - `role_id` / `secret_id` stored as masked, protected GitLab CI/CD variables
-- Least privilege verified: an AppRole token reads `secret/test/hello` but is
-  denied write (403), confirming the policy boundary holds
+- Least privilege verified: an AppRole token reads a secret but is denied write (403), confirming the policy boundary holds
 
-**Pipeline integration** (`.gitlab-ci.yml`, `secrets` stage)
+### SOPS — encrypted config committed to the repo
 
-The `vault-secret-test` job runs in a `hashicorp/vault` image, logs in via
-AppRole, and retrieves a secret during the pipeline — proving the runner can
-authenticate to Vault and pull secrets at build time.
+Where Vault serves secrets at runtime over the network, SOPS solves the complementary problem: secrets at rest, versioned alongside the code that uses them.
 
-**Proven:** Vault init/unseal lifecycle, Shamir key sharing, KV v2 API paths
-(`secret/data/...`), AppRole machine auth, least-privilege policy enforcement,
-CI-to-Vault reachability across a Tailscale mesh.
+- `.sops.yaml` config encrypts any `*.enc.yaml` file to an age public key
+- `secrets.enc.yaml` is committed encrypted — values become `ENC[AES256_GCM,...]` ciphertext while keys stay readable, so a diff shows *which* secret changed without exposing *what* it changed to
+- The age private key never enters the repo; `.gitignore` blocks the plaintext and key material
+- CI decrypts with the private key supplied as a masked `SOPS_AGE_KEY` variable — SOPS reads it straight from the environment, no key file on the runner
 
-**Remaining:** SOPS-encrypted config in-repo; AWS Secrets Manager for production
-secrets (to replace the gitignored registry token in `nomad/relay.nomad.hcl`).
+### AWS Secrets Manager
+
+A secret was created in AWS Secrets Manager and retrieval verified via the CLI, establishing the mechanism for the AWS deploy path. This is where production secrets belong: ECS task definitions reference Secrets Manager ARNs directly and AWS injects them at container start, no application code required. That wiring lands in Phase 7 alongside the ECS deployment.
+
+### Pipeline integration (`.gitlab-ci.yml`, `secrets` stage)
+
+A dedicated `secrets` stage runs two jobs, both green in pipeline #272:
+
+- `vault-secret-test` — logs into Vault via AppRole and retrieves a secret at build time, proving CI-to-Vault reachability across the Tailscale mesh
+- `sops-decrypt-test` — decrypts `secrets.enc.yaml` using `SOPS_AGE_KEY`, proving the in-repo encryption round-trips through CI
+
+### Nomad relay job — credential-free spec
+
+The relay Nomad job (`nomad/relay.nomad.hcl`) previously carried a hardcoded GitLab registry token, which is why the file was gitignored since Phase 4. That token is gone. Registry credentials now live in a root-only file on the host (`/etc/nomad-docker/docker-auth.json`, mode 600), outside the repo, and the Docker driver reads them automatically. The job spec contains no secrets and is now committed to the repo — closing the loose end Phase 6 was meant to resolve.
+
+### Two supply-chain CVEs caught in-flight
+
+While closing out the phase, the pipeline's security gates caught two real vulnerabilities and blocked the release until each was patched:
+
+- `govulncheck` flagged `GO-2026-4985` in the OTel HTTP exporters (`otlptracehttp` / `otlpmetrichttp` lagging at `v1.42.0`); bumped to `v1.43.0`
+- `trivy` flagged four HIGH CVEs in the transitive `golang.org/x/net@v0.52.0`; bumped to `v0.55.0`
+
+Different tools, different scope — govulncheck fails only on vulnerabilities the code actually calls, trivy flags everything present in the image — and both are legitimate parts of the gate.
+
+**Proven:** Vault init/unseal lifecycle, Shamir key sharing and migration to KMS auto-unseal, KV v2 API paths, AppRole machine auth, least-privilege policy and IAM design, SOPS/age encrypt-commit-decrypt loop, CI secret retrieval from both Vault and SOPS, AWS Secrets Manager create/retrieve, credential-free Nomad job spec sourcing registry auth from a host-local file.
+
+---
+## Phase 7
+ECS deployment wired directly into the GitLab pipeline's `deploy` stage, with runtime secrets sourced from AWS Secrets Manager via the task execution role
+
+---
+## Phase 8
+Kubernetes path: manifests, Helm chart, documented rolling / blue-green / canary strategies (Argo Rollouts concepts)
+
+---
+## Phase 9
+Lambda (Go or Python) + CloudWatch Events to clean up old ECR images, deployed via Terraform
 
 ---
 
-## Roadmapped
-
-- **Phase 6 (remaining)** — SOPS for encrypted config files in-repo; AWS Secrets
-  Manager for production secrets (replacing the gitignored registry token in
-  `nomad/relay.nomad.hcl`). Vault + AppRole pipeline integration complete (see above).
-- **Phase 7** — ECS deployment wired directly into the GitLab pipeline's `deploy` stage
-- **Phase 8** — Kubernetes path: manifests, Helm chart, documented rolling / blue-green / canary strategies (Argo Rollouts concepts)
-- **Phase 9** — Lambda (Go or Python) + CloudWatch Events to clean up old ECR images, deployed via Terraform
-- **Phase 10** — Architecture diagram, deployment-path docs, secrets-flow docs, observability-setup docs
-
----
-
-## Repo pointers
-
-- GitLab (primary): `buildeployship/go-cicd-observability`
-- GitHub (mirror): `Buildeployship/go-cicd-observability`
-- Homelab stack integrates with: [self-hosted-cicd-observability-stack](https://github.com/Buildeployship/self-hosted-cicd-observability-stack)
+## Phase 10
+Architecture diagram, deployment-path docs, secrets-flow docs, observability-setup docs
