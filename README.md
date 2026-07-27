@@ -1,35 +1,50 @@
-# go-cicd-observability
-
 [![CI/CD](https://github.com/Buildeployship/go-cicd-observability/actions/workflows/ci.yml/badge.svg)](https://github.com/Buildeployship/go-cicd-observability/actions)
 [![GitLab CI/CD](https://img.shields.io/badge/GitLab%20CI%2FCD-7%20stages-FC6D26?logo=gitlab&logoColor=white)](.gitlab-ci.yml)
 [![Terraform](https://img.shields.io/badge/Terraform-1.14+-7B42BC?logo=terraform&logoColor=white)](https://www.terraform.io/)
 [![Docker](https://img.shields.io/badge/Docker-multi--stage-2496ED?logo=docker&logoColor=white)](Dockerfile)
 [![AWS](https://img.shields.io/badge/AWS-ECS%20Fargate-FF9900?logo=amazonwebservices&logoColor=white)](terraform/)
 
-A Go webhook relay service taken from source code through a full CI/CD pipeline, local orchestration with service mesh, a complete observability stack, and a live AWS deployment — all defined as code and torn down cleanly.
+# go-cicd-observability
 
-## Purpose
+**Description:** A Go webhook relay shipped from source code through a seven-stage GitLab CI/CD pipeline: observability, orchestration, AWS deployment, secrets management.
+
+**Why Go:** It compiles to a single binary, which makes the Docker image smaller and the multi-stage build cleaner. It also signals fluency in the DevOps ecosystem — Docker, Kubernetes, Terraform, and Prometheus are all written in Go.
+
+**Target:** maximum mid-level DevOps coverage in one coherent project rather than tools scattered across unrelated exercises.
 
 **Full ownership from problem to production**: Identify, design, build, deploy, monitor, optimize. No handoffs.
 
-This project is a proof-of-capability build — not a production application, but a deliberate walk through the full DevOps lifecycle using a real Go service as the subject. The goal is to demonstrate ownership of every layer: writing and containerizing the application, building and securing the CI/CD pipeline, instrumenting for observability, orchestrating locally with Nomad and Consul, and deploying to AWS with Terraform. Go was chosen not because I am a Go developer, but because it is the language of the DevOps ecosystem — Docker, Kubernetes, Terraform, and Prometheus are all written in Go — and building in it produces the kind of clean, minimal artifacts that make the infrastructure work visible rather than obscured by runtime complexity. Every phase adds a layer. Every layer is documented. The stack is designed to cover the full breadth of mid-level DevOps tooling in a single coherent project rather than scattered across unrelated exercises.
+**Pillars:** Automation (Build) · Delivery (Ship) · Operations (Run).
+
+**Tech Stack**
+- Language / app: Go, slog, prometheus/client_golang
+- Containers: Docker, Docker Compose
+- CI/CD: GitLab CI/CD, GitHub Actions
+- Security scanning: Trivy, golangci-lint, govulncheck
+- Observability: OpenTelemetry, OTel Collector, Loki-Grafana-Tempo-Mimir (LGTM) stack, Alloy, Alertmanager
+- Orchestration: Nomad, Consul, Consul Connect (service mesh) mTLS, Envoy
+- IaC: Terraform, CloudFormation
+- AWS: VPC, ALB/ELB, ECS/Fargate, ECR, S3, IAM, CloudWatch, EC2, KMS
+- Secrets: HashiCorp Vault (AppRole, KMS auto-unseal), SOPS, age, AWS Secrets Manager
+- Networking: Tailscale
+- Scripting/config: Bash, YAML, HCL, Git
 
 ---
 
 ## Phases
 
-| Phase | Focus                                           |
-|-------|-------------------------------------------------|
-| 1     | Go webhook relay (local)                        |
-| 2     | GitLab CI/CD pipeline                           |
-| 3     | Observability (LGTM stack)                      |
-| 4     | Nomad + Consul service mesh                     |
-| 5     | Terraform + AWS                                 |
-| 6     | Vault + SOPS + AWS Secrets Manager              |
-| 7     | GitLab CI/CD deploy stage to ECS                |
-| 8     | K8s manifests + Helm chart (alternative to ECS) |
-| 9     | Lambda + CloudWatch Events for ECR cleanup      |
-| 10    | Architecture diagrams + deployment path docs    |
+| Phase | Focus                  | Key tools                                                                           |
+| ----- | ---------------------- | ----------------------------------------------------------------------------------- |
+| 1     | Go webhook relay       | Go, Docker, Docker Compose, slog, prometheus/client_golang                          |
+| 2     | GitLab CI/CD pipeline  | GitLab CI/CD, GitHub Actions, Trivy, golangci-lint, govulncheck dependency scanning |
+| 3     | Observability          | OpenTelemetry, OTel Collector, Tempo, Mimir, Loki, Alloy, Grafana, Alertmanager     |
+| 4     | Consul + Nomad         | Consul, Nomad, Consul Connect (service mesh), mTLS                                  |
+| 5     | Terraform + AWS        | Terraform, CloudFormation, VPC, subnets, ALB, ECS, S3, IAM, ECR, CloudWatch         |
+| 6     | Secrets management     | HashiCorp Vault, SOPS, AWS Secrets Manager                                          |
+| 7     | AWS ECS deployment     | ECS (Fargate/EC2), ECR, ALB routing, CloudWatch                                     |
+| 8     | Kubernetes deployment  | K8s manifests, Helm, rolling update, blue-green/canary docs                         |
+| 9     | Lambda cleanup         | Lambda (Go/Python), CloudWatch Events, IAM, ECR cleanup                             |
+| 10    | README & documentation | Architecture diagram, deployment paths, secrets flow, observability setup           |
 
 ---
 
@@ -44,18 +59,6 @@ Go app (OTel SDK)  →  OTel Collector  →  Tempo (traces) / Mimir (metrics) / 
 ```
 
 The same container image ships to two deploy targets: a Nomad cluster with Consul Connect service mesh on the homelab, and ECS Fargate behind an ALB on AWS. Observability signals from both paths flow into a single LGTM stack.
-
----
-
-## Tech stack
-
-**Automation:** GitLab CI/CD, GitHub Actions, Terraform, Bash, Go, YAML, HCL, Git
-
-**Delivery:** Docker, Docker Compose, Nomad, Consul, Consul Connect (service mesh), AWS (IAM, EC2, ECS Fargate, ECR, S3, ALB/ELB, CloudWatch)
-
-**Operations:** OpenTelemetry, OTel Collector, Tempo, Mimir, Loki, Grafana, Alertmanager, Alloy, CloudWatch
-
-**Secrets:** HashiCorp Vault (AppRole, KMS auto-unseal), SOPS + age, AWS Secrets Manager
 
 ---
 
